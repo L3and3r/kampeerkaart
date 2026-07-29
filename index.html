@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#141C24">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Kampeerkaart</title>
+<link rel="manifest" href='data:application/json,{"name":"Kampeerkaart","short_name":"Kampeerkaart","start_url":"./","display":"standalone","background_color":"%23141C24","theme_color":"%23141C24","icons":[]}'>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{
+    --rock:#141C24; --rock-2:#1E2A35; --rock-3:#2B3A47; --line:#3A4C5B;
+    --snow:#E8EEF1; --snow-dim:#94A7B4; --water:#5CB1D8; --dnt:#C8352B;
+    --moss:#7FA65B; --warn:#E0A33E; --sheet-peek:132px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;overscroll-behavior:none}
+  body{background:var(--rock);color:var(--snow);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size:15px;line-height:1.45}
+  .legend{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--snow-dim)}
+  .num{font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+
+  #map{position:fixed;inset:0;background:#0E141A}
+  .leaflet-container{background:#0E141A;font-family:inherit}
+
+  #top{position:fixed;top:0;left:0;right:0;z-index:600;
+    padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;
+    background:linear-gradient(180deg,rgba(20,28,36,.92),rgba(20,28,36,0));
+    pointer-events:none;display:flex;gap:8px;align-items:flex-start}
+  #layers{display:flex;gap:4px;pointer-events:auto;background:var(--rock-2);
+    border:1px solid var(--line);border-radius:9px;padding:3px}
+  #layers button{background:none;border:0;color:var(--snow-dim);padding:6px 9px;border-radius:6px;
+    font:inherit;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+  #layers button[aria-pressed="true"]{background:var(--rock-3);color:var(--snow)}
+  #status{margin-left:auto;pointer-events:auto;background:var(--rock-2);border:1px solid var(--line);
+    border-radius:9px;padding:6px 10px;max-width:54%;text-align:right}
+  #status .v{font-size:13px;font-weight:600}
+  #offbadge{display:none;font-size:9px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--warn);margin-top:2px}
+  body.offline #offbadge{display:block}
+
+  #radarbar{position:fixed;left:10px;right:10px;z-index:600;
+    bottom:calc(var(--sheet-peek) + env(safe-area-inset-bottom) + 10px);
+    background:var(--rock-2);border:1px solid var(--line);border-radius:11px;
+    padding:9px 11px 7px;display:none}
+  #radarbar.on{display:block}
+  #radarbar .row{display:flex;align-items:center;gap:10px}
+  #playpause{flex:0 0 auto;width:34px;height:34px;border-radius:8px;border:1px solid var(--line);
+    background:var(--rock-3);color:var(--snow);font-size:13px;cursor:pointer;display:grid;place-items:center}
+  #frame{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:var(--line);outline:none}
+  #frame::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--water);border:2px solid var(--rock-2)}
+  #frame::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--water);border:2px solid var(--rock-2)}
+  #frametime{flex:0 0 auto;min-width:64px;text-align:right;font-size:14px;font-weight:600}
+  #frametime.future{color:var(--water)}
+  #radarbar .foot{display:flex;justify-content:space-between;margin-top:5px}
+
+  #sheet{position:fixed;left:0;right:0;bottom:0;z-index:700;background:var(--rock-2);
+    border-top:1px solid var(--line);border-radius:16px 16px 0 0;max-height:80vh;
+    display:flex;flex-direction:column;transition:transform .28s cubic-bezier(.22,.9,.3,1)}
+  #grip{padding:9px 0 4px;display:grid;place-items:center;cursor:grab;flex:0 0 auto}
+  #grip span{width:38px;height:4px;border-radius:2px;background:var(--line);display:block}
+  #sheetbody{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 14px calc(14px + env(safe-area-inset-bottom))}
+
+  #actions{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px}
+  .act{background:var(--rock-3);border:1px solid var(--line);border-radius:10px;color:var(--snow);
+    padding:10px 4px;font:inherit;font-size:11px;font-weight:600;cursor:pointer;text-align:center;line-height:1.25}
+  .act[aria-pressed="true"]{border-color:var(--water);color:var(--water)}
+  .act:disabled{opacity:.45}
+
+  #verdict{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px}
+  #verdict.hidden{display:none}
+  #vhead{padding:12px 13px 11px;border-left:4px solid var(--line);background:var(--rock-3)}
+  #vhead.ok{border-left-color:var(--moss)} #vhead.warn{border-left-color:var(--warn)} #vhead.no{border-left-color:var(--dnt)}
+  #vtitle{font-size:19px;font-weight:700;letter-spacing:-.02em;margin:2px 0 0}
+  #vsub{font-size:13px;color:var(--snow-dim);margin-top:3px}
+  #vfacts{list-style:none;margin:0;padding:2px 0}
+  #vfacts li{display:flex;gap:11px;padding:9px 13px;border-top:1px solid var(--line);align-items:baseline}
+  #vfacts li .k{flex:0 0 96px;font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--snow-dim);padding-top:2px}
+  #vfacts li .d{flex:1;font-size:14px}
+  #vfacts li .d small{display:block;color:var(--snow-dim);font-size:12px;margin-top:1px}
+  #vsave{width:100%;border:0;border-top:1px solid var(--line);background:var(--rock-3);color:var(--snow);
+    padding:12px;font:inherit;font-weight:600;font-size:14px;cursor:pointer}
+  #vsave:disabled{opacity:.5}
+
+  .block{margin-bottom:14px}
+  .block > .legend{margin-bottom:7px;display:flex;justify-content:space-between}
+  .item{display:flex;gap:11px;align-items:center;padding:9px 0;border-top:1px solid var(--line);cursor:pointer}
+  .item:first-of-type{border-top:0}
+  .dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--water)}
+  .dot.saved{background:var(--dnt);border-radius:1px}
+  .item .t{flex:1;min-width:0}
+  .item .t b{display:block;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .t small{color:var(--snow-dim);font-size:12px}
+  .item .m{flex:0 0 auto;font-size:13px;color:var(--snow-dim)}
+  .del{flex:0 0 auto;background:none;border:0;color:var(--snow-dim);font-size:17px;padding:4px 6px;cursor:pointer}
+  .empty{color:var(--snow-dim);font-size:13px;padding:8px 0 2px}
+
+  /* offline-paneel */
+  #offline.hidden{display:none}
+  .etappe{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+  .etappe:first-of-type{border-top:0}
+  .etappe .t{flex:1;min-width:0}
+  .etappe .t b{display:block;font-size:14px;font-weight:600}
+  .etappe .t small{color:var(--snow-dim);font-size:12px}
+  .etappe button{flex:0 0 auto;background:var(--rock-3);border:1px solid var(--line);color:var(--snow);
+    border-radius:8px;padding:7px 11px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .etappe button.done{border-color:var(--moss);color:var(--moss)}
+  .etappe button:disabled{opacity:.5}
+  #zoomrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+  #zoomrow input{flex:1}
+  #dlbar{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin:8px 0 2px;display:none}
+  #dlbar.on{display:block}
+  #dlfill{height:100%;width:0;background:var(--water);transition:width .2s}
+  #dlstat{font-size:12px;color:var(--snow-dim);min-height:17px}
+  #cacherow{display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--line);margin-top:6px}
+  #wipe{background:none;border:1px solid var(--line);color:var(--dnt);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+
+  .note{font-size:12.5px;color:var(--snow-dim);border-top:1px solid var(--line);padding-top:11px;margin-top:0}
+  .note b{color:var(--warn);font-weight:600}
+  .note a{color:var(--water)}
+
+  .m-me{width:16px;height:16px;border-radius:50%;background:var(--water);border:2.5px solid var(--rock);box-shadow:0 0 0 1px var(--water)}
+  .m-pin{width:13px;height:13px;border-radius:50%;background:var(--water);border:2px solid var(--rock)}
+  .m-saved{width:15px;height:15px;background:var(--dnt);border:2px solid var(--rock);display:grid;place-items:center;color:#fff;font-size:9px;font-weight:800;line-height:1}
+  .m-probe{width:19px;height:19px;border-radius:50%;border:2px dashed var(--snow);background:rgba(232,238,241,.15)}
+  .leaflet-popup-content-wrapper{background:var(--rock-3);color:var(--snow);border-radius:9px}
+  .leaflet-popup-tip{background:var(--rock-3)}
+  .leaflet-control-attribution{background:rgba(20,28,36,.8)!important;color:var(--snow-dim)!important;font-size:9px!important}
+  .leaflet-control-attribution a{color:var(--snow-dim)!important}
+  .leaflet-control-zoom{display:none}
+  .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--line);border-top-color:var(--water);
+    border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  :focus-visible{outline:2px solid var(--water);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="top">
+  <div id="layers" role="group" aria-label="Kaartlaag">
+    <button data-layer="topo" aria-pressed="true">Topo</button>
+    <button data-layer="grey" aria-pressed="false">Grijs</button>
+    <button data-layer="osm" aria-pressed="false">OSM</button>
+  </div>
+  <div id="status">
+    <div class="legend">Positie</div>
+    <div class="v num" id="poslabel">zoeken…</div>
+    <div id="offbadge">Offline — opgeslagen kaart</div>
+  </div>
+</div>
+
+<div id="radarbar">
+  <div class="row">
+    <button id="playpause" aria-label="Radar afspelen">▶</button>
+    <input id="frame" type="range" min="0" max="0" value="0" aria-label="Radartijd">
+    <div id="frametime" class="num">—</div>
+  </div>
+  <div class="foot">
+    <span class="legend">Neerslagradar</span>
+    <span class="legend" id="radarsrc">RainViewer</span>
+  </div>
+</div>
+
+<section id="sheet" aria-label="Bedieningspaneel">
+  <div id="grip" role="button" tabindex="0" aria-label="Paneel openen of sluiten"><span></span></div>
+  <div id="sheetbody">
+
+    <div id="actions">
+      <button class="act" id="btnRadar" aria-pressed="false">Buien<br>radar</button>
+      <button class="act" id="btnHere">Mijn<br>positie</button>
+      <button class="act" id="btnSearch">Plekken<br>zoeken</button>
+      <button class="act" id="btnOffline" aria-pressed="false">Offline<br>kaart</button>
+    </div>
+
+    <div id="verdict" class="hidden">
+      <div id="vhead">
+        <div class="legend">Kan ik hier staan?</div>
+        <h2 id="vtitle">—</h2>
+        <div id="vsub"></div>
+      </div>
+      <ul id="vfacts"></ul>
+      <button id="vsave">Bewaar als kampeerplek</button>
+    </div>
+
+    <div class="block hidden" id="offline">
+      <div class="legend"><span>Kaart opslaan voor onderweg</span><span id="cachesize">—</span></div>
+      <div id="zoomrow">
+        <span class="legend" style="flex:0 0 auto">Detail t/m</span>
+        <input id="zoommax" type="range" min="11" max="15" value="13" aria-label="Maximaal detailniveau">
+        <span class="num" id="zoomlabel" style="flex:0 0 76px;text-align:right;font-size:13px">niveau 13</span>
+      </div>
+      <div id="etappes"></div>
+      <div id="dlbar"><div id="dlfill"></div></div>
+      <div id="dlstat"></div>
+      <div id="cacherow">
+        <span class="legend" id="cachecount">Nog niets opgeslagen</span>
+        <button id="wipe">Wis opgeslagen kaart</button>
+      </div>
+    </div>
+
+    <div class="block" id="foundBlock" style="display:none">
+      <div class="legend"><span>Kandidaten in de buurt</span><span id="foundCount"></span></div>
+      <div id="foundList"></div>
+    </div>
+
+    <div class="block">
+      <div class="legend"><span>Mijn plekken</span><span id="savedCount"></span></div>
+      <div id="savedList"><div class="empty">Nog geen plekken. Tik op de kaart om een plek te beoordelen en te bewaren.</div></div>
+    </div>
+
+    <p class="note">
+      De afstandscheck gebruikt gebouwen uit OpenStreetMap — een hytte die daar niet in staat, mist de app.
+      Kijk altijd zelf rond. <b>Bålforbud van 15 april tot 15 september</b>: open vuur in of vlakbij bos is nu verboden.
+      Offline werken de kaart, je GPS en je bewaarde plekken; radar en de neerslagtekst hebben bereik nodig.
+      <a href="https://www.yr.no" target="_blank" rel="noopener">yr.no</a> ·
+      <a href="https://varsom.no" target="_blank" rel="noopener">varsom.no</a>
+    </p>
+
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ============ IndexedDB ============ */
+var DB=null;
+function db(){
+  if(DB) return Promise.resolve(DB);
+  return new Promise(function(res,rej){
+    var r=indexedDB.open('kampeerkaart',1);
+    r.onupgradeneeded=function(e){
+      var d=e.target.result;
+      if(!d.objectStoreNames.contains('tiles')) d.createObjectStore('tiles');
+      if(!d.objectStoreNames.contains('meta')) d.createObjectStore('meta');
+    };
+    r.onsuccess=function(){ DB=r.result; res(DB); };
+    r.onerror=function(){ rej(r.error); };
+  });
+}
+function idbGet(store,key){
+  return db().then(function(d){ return new Promise(function(res){
+    var q=d.transaction(store).objectStore(store).get(key);
+    q.onsuccess=function(){ res(q.result); }; q.onerror=function(){ res(undefined); };
+  });}).catch(function(){ return undefined; });
+}
+function idbPut(store,key,val){
+  return db().then(function(d){ return new Promise(function(res){
+    var t=d.transaction(store,'readwrite');
+    t.objectStore(store).put(val,key);
+    t.oncomplete=function(){res(true);}; t.onerror=function(){res(false);};
+  });}).catch(function(){ return false; });
+}
+function idbCount(store){
+  return db().then(function(d){ return new Promise(function(res){
+    var q=d.transaction(store).objectStore(store).count();
+    q.onsuccess=function(){res(q.result);}; q.onerror=function(){res(0);};
+  });}).catch(function(){ return 0; });
+}
+function idbClear(store){
+  return db().then(function(d){ return new Promise(function(res){
+    var t=d.transaction(store,'readwrite'); t.objectStore(store).clear();
+    t.oncomplete=function(){res();}; t.onerror=function(){res();};
+  });}).catch(function(){});
+}
+
+/* ============ kaart met tegelcache ============ */
+var CachedLayer = L.TileLayer.extend({
+  createTile: function(coords, done){
+    var tile=document.createElement('img');
+    tile.alt=''; tile.setAttribute('role','presentation');
+    var key=this.options.ck+'/'+coords.z+'/'+coords.x+'/'+coords.y;
+    var url=this.getTileUrl(coords);
+    var self=this;
+    idbGet('tiles',key).then(function(blob){
+      if(blob){
+        var u=URL.createObjectURL(blob);
+        tile._objurl=u;
+        tile.onload=function(){ done(null,tile); };
+        tile.onerror=function(){ done(null,tile); };
+        tile.src=u;
+        return;
+      }
+      if(!navigator.onLine){ done(new Error('offline'),tile); return; }
+      fetch(url,{mode:'cors'}).then(function(r){
+        if(!r.ok) throw 0; return r.blob();
+      }).then(function(b){
+        idbPut('tiles',key,b);
+        var u=URL.createObjectURL(b); tile._objurl=u;
+        tile.onload=function(){ done(null,tile); };
+        tile.src=u;
+      }).catch(function(){
+        // CORS of netwerkfout: gewoon direct laden, dan zonder cache
+        tile.crossOrigin=null;
+        tile.onload=function(){ done(null,tile); };
+        tile.onerror=function(e){ done(e,tile); };
+        tile.src=url;
+      });
+    });
+    return tile;
+  }
+});
+
+var URLS={
+  topo:'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png',
+  grey:'https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/default/webmercator/{z}/{y}/{x}.png',
+  osm :'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+};
+var map=L.map('map',{zoomControl:false}).setView([60.2,7.5],7);
+var KV='Kart: <a href="https://www.kartverket.no">Kartverket</a>';
+var layers={
+  topo:new CachedLayer(URLS.topo,{maxZoom:18,ck:'topo',attribution:KV}),
+  grey:new CachedLayer(URLS.grey,{maxZoom:18,ck:'grey',attribution:KV}),
+  osm :new CachedLayer(URLS.osm ,{maxZoom:19,ck:'osm', attribution:'&copy; OpenStreetMap'})
+};
+var active='topo';
+layers.topo.addTo(map);
+Object.keys(layers).forEach(function(k){
+  layers[k].on('tileunload',function(e){ if(e.tile && e.tile._objurl){ URL.revokeObjectURL(e.tile._objurl); e.tile._objurl=null; } });
+});
+
+function setLayer(n){
+  if(n===active) return;
+  map.removeLayer(layers[active]); layers[n].addTo(map);
+  if(radarLayer) radarLayer.bringToFront();
+  active=n;
+  document.querySelectorAll('#layers button').forEach(function(b){ b.setAttribute('aria-pressed',String(b.dataset.layer===n)); });
+}
+document.querySelectorAll('#layers button').forEach(function(b){
+  b.addEventListener('click',function(){ setLayer(b.dataset.layer); });
+});
+
+/* ============ helpers ============ */
+function dist(a,b,c,d){var R=6371000,p=Math.PI/180,dl=(c-a)*p,dn=(d-b)*p;
+  var h=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a*p)*Math.cos(c*p)*Math.sin(dn/2)*Math.sin(dn/2);
+  return Math.round(2*R*Math.asin(Math.sqrt(h)));}
+function fmtM(m){return m>=1000?(m/1000).toFixed(1).replace('.',',')+' km':m+' m';}
+function dms(v){return v.toFixed(5).replace('.',',');}
+function hhmm(d){return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function el(i){return document.getElementById(i);}
+function icon(c,t){return L.divIcon({className:'',html:'<div class="'+c+'">'+(t||'')+'</div>',iconSize:[16,16],iconAnchor:[8,8]});}
+function esc(s){return String(s).replace(/[<>&]/g,function(c){return{'<':'&lt;','>':'&gt;','&':'&amp;'}[c];});}
+function mb(n){return n<1024?n.toFixed(0)+' MB':(n/1024).toFixed(1).replace('.',',')+' GB';}
+
+var toastEl,toastT;
+function toast(m){
+  if(!toastEl){toastEl=document.createElement('div');
+    toastEl.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--sheet-peek) + 70px);z-index:900;background:#2B3A47;border:1px solid #3A4C5B;color:#E8EEF1;padding:9px 14px;border-radius:9px;font-size:13px;max-width:88%;text-align:center;opacity:0;transition:opacity .2s';
+    document.body.appendChild(toastEl);}
+  toastEl.textContent=m; toastEl.style.opacity='1';
+  clearTimeout(toastT); toastT=setTimeout(function(){toastEl.style.opacity='0';},3600);
+}
+function netState(){ document.body.classList.toggle('offline',!navigator.onLine); }
+window.addEventListener('online',function(){netState();toast('Weer verbinding.');});
+window.addEventListener('offline',netState); netState();
+
+/* ============ positie ============ */
+var meMarker,meCircle,me=null;
+if(navigator.geolocation){
+  navigator.geolocation.watchPosition(function(p){
+    me={lat:p.coords.latitude,lon:p.coords.longitude,acc:Math.round(p.coords.accuracy)};
+    el('poslabel').innerHTML=dms(me.lat)+' &nbsp;'+dms(me.lon)+
+      '<br><span style="font-size:11px;color:var(--snow-dim)">±'+me.acc+' m</span>';
+    var ll=[me.lat,me.lon];
+    if(!meMarker){
+      meMarker=L.marker(ll,{icon:icon('m-me'),zIndexOffset:800}).addTo(map);
+      meCircle=L.circle(ll,{radius:me.acc,color:'#5CB1D8',weight:1,fillOpacity:.08}).addTo(map);
+      map.setView(ll,14);
+    } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(me.acc); }
+  },function(err){
+    el('poslabel').style.fontSize='13px';
+    el('poslabel').textContent = err.code===1?'geen toegang':'geen fix';
+    if(err.code===1) toast('Locatietoegang geweigerd — tik op de kaart om handmatig te kiezen.');
+  },{enableHighAccuracy:true,maximumAge:15000,timeout:20000});
+} else { el('poslabel').textContent='geen GPS'; }
+
+el('btnHere').addEventListener('click',function(){
+  if(me) map.setView([me.lat,me.lon],15); else toast('Nog geen GPS-fix.');
+});
+
+/* ============ radar ============ */
+var radarLayer=null,frames=[],fi=0,playing=false,playT=null,radarOn=false,radarHost='';
+function loadRadar(){
+  el('radarsrc').innerHTML='<span class="spin"></span> laden';
+  return fetch('https://api.rainviewer.com/public/weather-maps.json').then(function(r){return r.json();})
+  .then(function(j){
+    radarHost=j.host||'https://tilecache.rainviewer.com';
+    frames=(j.radar.past||[]).concat(j.radar.nowcast||[]);
+    if(!frames.length) throw 0;
+    fi=Math.max(0,(j.radar.past||[]).length-1);
+    el('frame').max=frames.length-1; el('frame').value=fi;
+    el('radarsrc').textContent='RainViewer'; showFrame(fi);
+  }).catch(function(){
+    el('radarsrc').textContent = navigator.onLine?'radar niet bereikbaar':'offline';
+    toast(navigator.onLine?'Radar niet bereikbaar.':'Radar heeft bereik nodig.');
+  });
+}
+function showFrame(i){
+  if(!frames[i])return;
+  var nl=L.tileLayer(radarHost+frames[i].path+'/256/{z}/{x}/{y}/4/1_1.png',
+    {opacity:0,zIndex:400,maxZoom:12,maxNativeZoom:10});
+  nl.addTo(map);
+  nl.once('load',function(){nl.setOpacity(.72);});
+  setTimeout(function(){nl.setOpacity(.72);},900);
+  var old=radarLayer; radarLayer=nl;
+  if(old) setTimeout(function(){map.removeLayer(old);},350);
+  var d=new Date(frames[i].time*1000);
+  el('frametime').textContent=hhmm(d);
+  el('frametime').classList.toggle('future',frames[i].time*1000>Date.now());
+  el('frame').value=i;
+}
+function pause(){playing=false;el('playpause').textContent='▶';clearInterval(playT);}
+el('playpause').addEventListener('click',function(){
+  if(playing){pause();return;}
+  playing=true; el('playpause').textContent='❚❚';
+  playT=setInterval(function(){fi=(fi+1)%frames.length;showFrame(fi);},550);
+});
+el('frame').addEventListener('input',function(){pause();fi=+this.value;showFrame(fi);});
+el('btnRadar').addEventListener('click',function(){
+  radarOn=!radarOn; this.setAttribute('aria-pressed',String(radarOn));
+  el('radarbar').classList.toggle('on',radarOn);
+  if(radarOn){ frames.length?showFrame(fi):loadRadar(); }
+  else{ pause(); if(radarLayer){map.removeLayer(radarLayer);radarLayer=null;} }
+});
+
+/* ============ MET nowcast ============ */
+function nowcast(lat,lon){
+  return fetch('https://api.met.no/weatherapi/nowcast/2.0/complete?lat='+lat.toFixed(4)+'&lon='+lon.toFixed(4))
+  .then(function(r){if(!r.ok)throw 0;return r.json();})
+  .then(function(j){
+    var ts=j.properties.timeseries||[],rates=[],first=null;
+    for(var i=0;i<ts.length&&i<19;i++){
+      var d=ts[i].data.instant.details||{};
+      if(typeof d.precipitation_rate==='number'){
+        rates.push(d.precipitation_rate);
+        if(d.precipitation_rate>0.1&&!first) first=new Date(ts[i].time);
+      }
+    }
+    var max=rates.length?Math.max.apply(null,rates):0;
+    var t0=ts[0]?ts[0].data.instant.details:{};
+    return {temp:t0.air_temperature,wind:t0.wind_speed,
+      text: max<0.1?'Droog in de komende 90 minuten'
+        :(first?'Neerslag vanaf ± '+hhmm(first):'Neerslag in de komende 90 minuten')
+         +' — piek '+max.toFixed(1).replace('.',',')+' mm/u'};
+  });
+}
+
+/* ============ Overpass ============ */
+var OVER=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+function overpass(q){
+  function go(i){
+    if(i>=OVER.length) return Promise.reject(new Error('overpass'));
+    return fetch(OVER[i],{method:'POST',body:'data='+encodeURIComponent(q),
+      headers:{'Content-Type':'application/x-www-form-urlencoded'}})
+      .then(function(r){if(!r.ok)throw 0;return r.json();}).catch(function(){return go(i+1);});
+  }
+  return go(0);
+}
+function ell(e){ if(typeof e.lat==='number')return[e.lat,e.lon]; if(e.center)return[e.center.lat,e.center.lon]; return null; }
+
+/* ============ verdict ============ */
+var probeMarker=null,probe=null;
+function assess(lat,lon){
+  probe={lat:lat,lon:lon};
+  if(probeMarker) map.removeLayer(probeMarker);
+  probeMarker=L.marker([lat,lon],{icon:icon('m-probe'),zIndexOffset:700}).addTo(map);
+  openSheet();
+  el('verdict').classList.remove('hidden');
+  el('vhead').className=''; el('vtitle').textContent='Aan het meten…';
+  el('vsub').textContent=dms(lat)+'  '+dms(lon);
+  el('vsave').disabled=false;
+
+  if(!navigator.onLine){
+    el('vhead').className='warn';
+    el('vtitle').textContent='Geen bereik';
+    el('vsub').textContent=dms(lat)+'  '+dms(lon);
+    el('vfacts').innerHTML='<li><span class="k">Check</span><span class="d">Afstand tot bebouwing niet te meten'
+      +'<small>Schat de 150 m zelf. Je kunt de plek wel bewaren.</small></span></li>'
+      +(me?'<li><span class="k">Vanaf jou</span><span class="d">'+fmtM(dist(me.lat,me.lon,lat,lon))+'</span></li>':'');
+    return;
+  }
+
+  el('vfacts').innerHTML='<li><span class="k">Bezig</span><span class="d"><span class="spin"></span> gebouwen en neerslag ophalen</span></li>';
+  var q='[out:json][timeout:25];('
+    +'nwr["building"](around:400,'+lat+','+lon+');'
+    +'way["landuse"~"^(farmland|meadow|orchard|residential|vineyard)$"](around:60,'+lat+','+lon+');'
+    +'nwr["leisure"="nature_reserve"](around:60,'+lat+','+lon+');'
+    +');out center 220;';
+
+  Promise.allSettled([overpass(q),nowcast(lat,lon)]).then(function(res){
+    var facts=[],v='ok',title='Waarschijnlijk toegestaan',sub='Volgens allemannsretten op utmark';
+    if(res[0].status==='fulfilled'){
+      var near=null,innmark=false,reserve=false;
+      (res[0].value.elements||[]).forEach(function(e){
+        var t=e.tags||{};
+        if(t.landuse) innmark=true;
+        if(t.leisure==='nature_reserve') reserve=true;
+        if(!t.building) return;
+        var ll=ell(e); if(!ll) return;
+        var d=dist(lat,lon,ll[0],ll[1]);
+        if(!near||d<near.d) near={d:d,type:t.building,name:t.name};
+      });
+      if(!near) facts.push({k:'Bebouwing',d:'Geen gebouw binnen 400 m',s:'Ruim binnen de regel'});
+      else{
+        var lbl=near.name||({house:'woonhuis',cabin:'hytte',detached:'woonhuis',hut:'hytte',residential:'woning',
+          farm:'boerderij',garage:'garage',shed:'schuur',barn:'schuur'}[near.type]||'gebouw');
+        facts.push({k:'Bebouwing',d:'Dichtstbijzijnde op '+fmtM(near.d),s:lbl});
+        if(near.d<150){v='no';title='Te dicht bij bebouwing';sub='De regel vraagt minimaal 150 m';}
+        else if(near.d<220){v='warn';title='Krap, maar het kan';sub='Net boven de 150 m — schuif liever door';}
+      }
+      if(innmark&&v!=='no'){v='warn';title='Mogelijk innmark';sub='Hier ligt akker, weide of woongrond';
+        facts.push({k:'Grond',d:'Landbouw- of woongrond binnen 60 m',s:'Op innmark mag je niet staan zonder toestemming'});}
+      if(reserve){ if(v==='ok'){v='warn';title='Beschermd gebied';sub='Check de lokale regels;'}
+        facts.push({k:'Status',d:'Natuurreservaat in de buurt',s:'Kamperen kan hier beperkt of verboden zijn'}); }
+    } else {
+      v='warn';title='Afstand niet te meten';sub='Geen kaartgegevens beschikbaar';
+      facts.push({k:'Bebouwing',d:'Niet opgehaald',s:'Schat de 150 m zelf in'});
+    }
+    if(res[1].status==='fulfilled'){
+      var w=res[1].value;
+      facts.push({k:'Neerslag',d:w.text,s:'Bron: MET Norway'});
+      if(typeof w.temp==='number') facts.push({k:'Nu',d:Math.round(w.temp)+' °C'+
+        (typeof w.wind==='number'?', wind '+Math.round(w.wind)+' m/s':''),s:''});
+    } else facts.push({k:'Neerslag',d:'Niet opgehaald',s:'Zet de buienradar aan of open yr.no'});
+    if(me) facts.push({k:'Vanaf jou',d:fmtM(dist(me.lat,me.lon,lat,lon)),s:''});
+
+    el('vhead').className=v; el('vtitle').textContent=title; el('vsub').textContent=sub;
+    el('vfacts').innerHTML=facts.map(function(f){
+      return '<li><span class="k">'+f.k+'</span><span class="d">'+f.d+(f.s?'<small>'+f.s+'</small>':'')+'</span></li>';
+    }).join('');
+  });
+}
+map.on('click',function(e){ assess(e.latlng.lat,e.latlng.lng); });
+
+/* ============ kandidaten ============ */
+var foundMarkers=[];
+el('btnSearch').addEventListener('click',function(){
+  if(!navigator.onLine){ toast('Zoeken heeft bereik nodig. Tik zelf een plek aan op de kaart.'); return; }
+  var c=me?[me.lat,me.lon]:[map.getCenter().lat,map.getCenter().lng];
+  var btn=this; btn.disabled=true; btn.innerHTML='Zoeken<span class="spin"></span>';
+  var q='[out:json][timeout:30];('
+   +'nwr["tourism"~"^(camp_site|caravan_site|wilderness_hut|picnic_site)$"](around:6000,'+c[0]+','+c[1]+');'
+   +'nwr["highway"="rest_area"](around:6000,'+c[0]+','+c[1]+');'
+   +'nwr["amenity"="parking"]["access"!="private"](around:6000,'+c[0]+','+c[1]+');'
+   +'nwr["natural"="beach"](around:6000,'+c[0]+','+c[1]+');'
+   +');out center 80;';
+  overpass(q).then(function(j){
+    foundMarkers.forEach(function(m){map.removeLayer(m);}); foundMarkers=[];
+    var list=[];
+    (j.elements||[]).forEach(function(e){
+      var ll=ell(e); if(!ll)return; var t=e.tags||{};
+      var kind=t.tourism==='camp_site'?'Camping':t.tourism==='caravan_site'?'Camperplaats':
+        t.tourism==='wilderness_hut'?'Berghut':t.tourism==='picnic_site'?'Picknickplek':
+        t.highway==='rest_area'?'Rustplaats':t.natural==='beach'?'Strand':'Parkeerplaats';
+      list.push({name:t.name||kind,kind:kind,lat:ll[0],lon:ll[1],d:dist(c[0],c[1],ll[0],ll[1])});
+    });
+    list.sort(function(a,b){return a.d-b.d;}); list=list.slice(0,25);
+    list.forEach(function(p){
+      var m=L.marker([p.lat,p.lon],{icon:icon('m-pin')}).addTo(map);
+      m.on('click',function(ev){L.DomEvent.stop(ev);assess(p.lat,p.lon);});
+      m.bindTooltip(p.name,{direction:'top',offset:[0,-8]});
+      foundMarkers.push(m);
+    });
+    el('foundBlock').style.display=list.length?'block':'none';
+    el('foundCount').textContent=list.length?list.length+' binnen 6 km':'';
+    el('foundList').innerHTML=list.map(function(p,i){
+      return '<div class="item" data-i="'+i+'"><span class="dot"></span><span class="t"><b>'+esc(p.name)+
+        '</b><small>'+p.kind+'</small></span><span class="m num">'+fmtM(p.d)+'</span></div>';
+    }).join('');
+    Array.prototype.forEach.call(el('foundList').children,function(row){
+      row.addEventListener('click',function(){ var p=list[+row.dataset.i]; map.setView([p.lat,p.lon],15); assess(p.lat,p.lon); });
+    });
+    if(!list.length) toast('Niets gevonden binnen 6 km.');
+    openSheet();
+  }).catch(function(){ toast('Zoeken mislukt.'); })
+  .finally(function(){ btn.disabled=false; btn.innerHTML='Plekken<br>zoeken'; });
+});
+
+/* ============ bewaarde plekken ============ */
+var saved=[],savedMarkers=[];
+function saveSpots(){ return idbPut('meta','spots',saved); }
+function renderSaved(){
+  savedMarkers.forEach(function(m){map.removeLayer(m);}); savedMarkers=[];
+  el('savedCount').textContent=saved.length||'';
+  if(!saved.length){
+    el('savedList').innerHTML='<div class="empty">Nog geen plekken. Tik op de kaart om een plek te beoordelen en te bewaren.</div>';
+    return;
+  }
+  el('savedList').innerHTML=saved.map(function(p,i){
+    var d=me?fmtM(dist(me.lat,me.lon,p.lat,p.lon)):'';
+    return '<div class="item"><span class="dot saved"></span><span class="t" data-go="'+i+'"><b>'+esc(p.name)+
+      '</b><small class="num">'+dms(p.lat)+'  '+dms(p.lon)+'</small></span><span class="m num">'+d+
+      '</span><button class="del" data-del="'+i+'" aria-label="Verwijder">×</button></div>';
+  }).join('');
+  saved.forEach(function(p){
+    var m=L.marker([p.lat,p.lon],{icon:icon('m-saved','T'),zIndexOffset:600}).addTo(map);
+    m.bindPopup('<b>'+esc(p.name)+'</b><br><span style="font-size:11px">'+dms(p.lat)+'  '+dms(p.lon)+'</span>');
+    savedMarkers.push(m);
+  });
+  el('savedList').querySelectorAll('[data-go]').forEach(function(n){
+    n.addEventListener('click',function(){var p=saved[+n.dataset.go];map.setView([p.lat,p.lon],15);});
+  });
+  el('savedList').querySelectorAll('[data-del]').forEach(function(n){
+    n.addEventListener('click',function(){saved.splice(+n.dataset.del,1);saveSpots();renderSaved();});
+  });
+}
+el('vsave').addEventListener('click',function(){
+  if(!probe)return;
+  var n=prompt('Naam voor deze plek:','Plek '+(saved.length+1));
+  if(n===null)return;
+  saved.push({name:(n||'').trim()||('Plek '+(saved.length+1)),lat:probe.lat,lon:probe.lon,ts:Date.now()});
+  saveSpots(); renderSaved(); toast('Bewaard.');
+});
+idbGet('meta','spots').then(function(s){ saved=Array.isArray(s)?s:[]; renderSaved(); });
+
+/* ============ offline kaart ============ */
+var ETAPPES=[
+  {n:'Kristiansand & Setesdal',   s:'Rv9 noordwaarts',        b:[[58.05,7.55],[59.45,8.35]]},
+  {n:'Haukeli & Røldal',          s:'E134 over de vidde',     b:[[59.60,6.75],[60.05,7.75]]},
+  {n:'Odda, Tyssedal & Trolltunga',s:'Sørfjorden',            b:[[59.95,6.35],[60.35,7.05]]},
+  {n:'Hardangerfjord & Eidfjord', s:'Vøringsfossen',          b:[[60.25,6.45],[60.70,7.45]]},
+  {n:'Hardangervidda',            s:'Rv7 hoogvlakte',         b:[[60.15,7.25],[60.75,8.45]]},
+  {n:'Rjukan & Tinn',             s:'route terug zuidwaarts', b:[[59.70,8.20],[60.15,9.10]]}
+];
+var offlineOpen=false;
+el('btnOffline').addEventListener('click',function(){
+  offlineOpen=!offlineOpen;
+  this.setAttribute('aria-pressed',String(offlineOpen));
+  el('offline').classList.toggle('hidden',!offlineOpen);
+  if(offlineOpen){ renderEtappes(); refreshCache(); openSheet(); }
+});
+el('zoommax').addEventListener('input',function(){
+  el('zoomlabel').textContent='niveau '+this.value; renderEtappes();
+});
+
+function tilesFor(b,zmin,zmax){
+  var out=[];
+  for(var z=zmin;z<=zmax;z++){
+    var n=Math.pow(2,z);
+    function xt(lon){ return Math.floor((lon+180)/360*n); }
+    function yt(lat){ var r=lat*Math.PI/180;
+      return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n); }
+    var x0=xt(b[0][1]),x1=xt(b[1][1]),y0=yt(b[1][0]),y1=yt(b[0][0]);
+    for(var x=x0;x<=x1;x++) for(var y=y0;y<=y1;y++) out.push([z,x,y]);
+  }
+  return out;
+}
+function renderEtappes(){
+  var zmax=+el('zoommax').value;
+  el('etappes').innerHTML=ETAPPES.map(function(e,i){
+    var t=tilesFor(e.b,8,zmax).length;
+    return '<div class="etappe"><span class="t"><b>'+e.n+'</b><small>'+e.s+' · '+t+
+      ' tegels, ± '+mb(t*0.045)+'</small></span><button data-dl="'+i+'">Opslaan</button></div>';
+  }).join('');
+  el('etappes').querySelectorAll('[data-dl]').forEach(function(btn){
+    btn.addEventListener('click',function(){ download(ETAPPES[+btn.dataset.dl],btn); });
+  });
+}
+var busy=false;
+function download(etappe,btn){
+  if(busy){ toast('Er loopt al een download.'); return; }
+  if(!navigator.onLine){ toast('Opslaan heeft bereik nodig.'); return; }
+  busy=true;
+  var zmax=+el('zoommax').value;
+  var tiles=tilesFor(etappe.b,8,zmax);
+  var tmpl=URLS[active], ck=active, done=0, failed=0, stop=false;
+  el('dlbar').classList.add('on');
+  btn.disabled=true; btn.textContent='Bezig';
+  el('dlstat').textContent='0 / '+tiles.length+' — laat het scherm aan staan';
+
+  function one(t){
+    var key=ck+'/'+t[0]+'/'+t[1]+'/'+t[2];
+    return idbGet('tiles',key).then(function(has){
+      if(has) return;
+      var url=tmpl.replace('{z}',t[0]).replace('{x}',t[1]).replace('{y}',t[2]);
+      return fetch(url,{mode:'cors'}).then(function(r){ if(!r.ok)throw 0; return r.blob(); })
+        .then(function(b){ return idbPut('tiles',key,b); })
+        .catch(function(){ failed++; });
+    }).then(function(){
+      done++;
+      if(done%15===0||done===tiles.length){
+        el('dlfill').style.width=(done/tiles.length*100)+'%';
+        el('dlstat').textContent=done+' / '+tiles.length+(failed?' ('+failed+' mislukt)':'');
+      }
+    });
+  }
+  var idx=0;
+  function worker(){
+    if(stop||idx>=tiles.length) return Promise.resolve();
+    var t=tiles[idx++];
+    return one(t).then(function(){ return new Promise(function(r){setTimeout(r,25);}); }).then(worker);
+  }
+  Promise.all([worker(),worker(),worker(),worker()]).then(function(){
+    btn.textContent='Opgeslagen'; btn.classList.add('done'); btn.disabled=false;
+    el('dlstat').textContent='Klaar: '+etappe.n+(failed?' — '+failed+' tegels mislukt':'');
+    el('dlbar').classList.remove('on'); el('dlfill').style.width='0';
+    busy=false; refreshCache();
+  });
+}
+function refreshCache(){
+  idbCount('tiles').then(function(c){
+    el('cachesize').textContent=c?mb(c*0.045):'—';
+    el('cachecount').textContent=c?c+' tegels opgeslagen':'Nog niets opgeslagen';
+  });
+}
+el('wipe').addEventListener('click',function(){
+  if(!confirm('Alle opgeslagen kaarttegels wissen?')) return;
+  idbClear('tiles').then(function(){ refreshCache(); renderEtappes(); toast('Kaartcache gewist.'); });
+});
+if(navigator.storage&&navigator.storage.persist) navigator.storage.persist();
+
+/* ============ paneel ============ */
+var sheet=el('sheet'),open=false;
+function measure(){
+  var full=sheet.getBoundingClientRect().height;
+  var peek=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sheet-peek'));
+  sheet.style.transform= open?'translateY(0)':'translateY('+Math.max(0,full-peek)+'px)';
+}
+function openSheet(){ if(!open){open=true;measure();} }
+el('grip').addEventListener('click',function(){open=!open;measure();});
+el('grip').addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){e.preventDefault();open=!open;measure();} });
+window.addEventListener('resize',measure);
+setTimeout(measure,60);
+new ResizeObserver(measure).observe(el('sheetbody'));
+
+/* ============ service worker ============ */
+if('serviceWorker' in navigator && location.protocol==='https:'){
+  navigator.serviceWorker.register('sw.js').catch(function(){});
+}
+
+})();
+</script>
+</body>
+</html>
