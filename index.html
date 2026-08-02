@@ -640,6 +640,233 @@ function forecast(lat,lon){
   });
 }
 
+/* ============ volledig weerbericht (MET Norway puntverwachting) ============ */
+/* Bron: locationforecast/2.0/complete — het model van het Noorse meteorologisch
+   instituut, dezelfde verwachting die yr.no toont. Los van de radar. */
+var W={data:null,tab:'uur',lat:null,lon:null};
+var DAG=['zo','ma','di','wo','do','vr','za'];
+
+function dagdeelNaam(h){
+  if(h<6) return 'nacht'; if(h<12) return 'ochtend'; if(h<18) return 'middag'; return 'avond';
+}
+function pressureWord(p){
+  if(p<995) return 'lage druk'; if(p>1020) return 'hoge druk'; return 'normaal';
+}
+function fullForecast(lat,lon){
+  var fx=fetch('https://api.met.no/weatherapi/locationforecast/2.0/complete?lat='+lat.toFixed(4)+'&lon='+lon.toFixed(4))
+    .then(function(r){if(!r.ok)throw 0;return r.json();});
+  var tz=-new Date().getTimezoneOffset(), sign=tz<0?'-':'+';
+  var off=sign+String(Math.floor(Math.abs(tz)/60)).padStart(2,'0')+':'+String(Math.abs(tz)%60).padStart(2,'0');
+  var d=new Date(), dstr=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  var sx=fetch('https://api.met.no/weatherapi/sunrise/3.0/sun?lat='+lat.toFixed(3)+'&lon='+lon.toFixed(3)+
+      '&date='+dstr+'&offset='+encodeURIComponent(off))
+    .then(function(r){if(!r.ok)throw 0;return r.json();}).catch(function(){return null;});
+
+  return Promise.all([fx,sx]).then(function(r){
+    var ts=(r[0].properties||{}).timeseries||[];
+    if(!ts.length) throw 0;
+    var updated=(r[0].properties.meta||{}).updated_at;
+
+    /* nu */
+    var i0=ts[0].data, det=i0.instant.details||{};
+    var now={
+      temp:det.air_temperature, wind:det.wind_speed, gust:det.wind_speed_of_gust,
+      dir:det.wind_from_direction, hum:det.relative_humidity, dew:det.dew_point_temperature,
+      pres:det.air_pressure_at_sea_level, cloud:det.cloud_area_fraction,
+      fog:det.fog_area_fraction, uv:det.ultraviolet_index_clear_sky,
+      sym:((i0.next_1_hours||i0.next_6_hours||{}).summary||{}).symbol_code,
+      mm1:((i0.next_1_hours||{}).details||{}).precipitation_amount
+    };
+
+    /* per uur, 24 stappen */
+    var hours=[];
+    for(var i=0;i<ts.length&&hours.length<24;i++){
+      var p=ts[i],n1=p.data.next_1_hours;
+      if(!n1)continue;
+      var dd=p.data.instant.details||{};
+      hours.push({t:new Date(p.time),temp:dd.air_temperature,wind:dd.wind_speed,gust:dd.wind_speed_of_gust,
+        dir:dd.wind_from_direction,mm:(n1.details||{}).precipitation_amount||0,
+        mmMax:(n1.details||{}).precipitation_amount_max,sym:(n1.summary||{}).symbol_code});
+    }
+
+    /* per dagdeel, uit de 6-uursblokken */
+    var parts=[];
+    for(var j=0;j<ts.length&&parts.length<12;j++){
+      var q=ts[j],n6=q.data.next_6_hours;
+      if(!n6)continue;
+      var t=new Date(q.time);
+      if(parts.length&&t-parts[parts.length-1].t<5.5*3600000) continue;
+      var de=q.data.instant.details||{};
+      parts.push({t:t,label:DAG[t.getDay()]+' '+dagdeelNaam(t.getHours()),
+        temp:(n6.details||{}).air_temperature_max,
+        tmin:(n6.details||{}).air_temperature_min,
+        mm:(n6.details||{}).precipitation_amount||0,
+        mmMax:(n6.details||{}).precipitation_amount_max,
+        wind:de.wind_speed,dir:de.wind_from_direction,sym:(n6.summary||{}).symbol_code});
+    }
+
+    /* per dag */
+    var byDay={},order=[];
+    ts.forEach(function(p){
+      var t=new Date(p.time),k=t.toDateString();
+      var n6=p.data.next_6_hours,n1=p.data.next_1_hours;
+      var temp=(p.data.instant.details||{}).air_temperature;
+      if(!byDay[k]){byDay[k]={t:t,min:null,max:null,mm:0,syms:{},wind:0};order.push(k);}
+      var b=byDay[k];
+      if(typeof temp==='number'){
+        if(b.min===null||temp<b.min)b.min=temp;
+        if(b.max===null||temp>b.max)b.max=temp;
+      }
+      var w=(p.data.instant.details||{}).wind_speed;
+      if(typeof w==='number'&&w>b.wind)b.wind=w;
+      if(n6){
+        b.mm+=(n6.details||{}).precipitation_amount||0;
+        var s=(n6.summary||{}).symbol_code;
+        if(s&&t.getHours()>=6&&t.getHours()<18){var base=s.split('_')[0];b.syms[base]=(b.syms[base]||0)+1;}
+      } else if(n1){ b.mm+=(n1.details||{}).precipitation_amount||0; }
+    });
+    var days=order.slice(0,7).map(function(k){
+      var b=byDay[k],best=null,n=0;
+      Object.keys(b.syms).forEach(function(s){if(b.syms[s]>n){n=b.syms[s];best=s;}});
+      return {t:b.t,min:b.min,max:b.max,mm:b.mm,sym:best,wind:b.wind};
+    });
+
+    /* zon */
+    var sun=null;
+    try{
+      var pr=r[1].properties;
+      sun={up:new Date(pr.sunrise.time),down:new Date(pr.sunset.time)};
+    }catch(e){}
+
+    /* samenvattende zin over vandaag en morgen */
+    var line;
+    var wet24=hours.filter(function(h){return h.mm>0.1;});
+    var sum24=hours.reduce(function(a,h){return a+h.mm;},0);
+    var maxw=hours.reduce(function(a,h){return Math.max(a,h.wind||0);},0);
+    var maxg=hours.reduce(function(a,h){return Math.max(a,h.gust||0);},0);
+    if(!wet24.length) line='Komende 24 uur droog. '+windWord(maxw)[0].toUpperCase()+windWord(maxw).slice(1)+
+      ' uit het '+windDir(hours.length?hours[0].dir:0)+
+      (maxg>13?', uitschieters tot '+Math.round(maxg)+' m/s':'')+'.';
+    else line='Neerslag vanaf ± '+hh(wet24[0].t)+', in totaal ± '+nl1(sum24)+' mm in 24 uur. '+
+      windWord(maxw)[0].toUpperCase()+windWord(maxw).slice(1)+' uit het '+windDir(hours[0].dir)+
+      (maxg>13?', uitschieters tot '+Math.round(maxg)+' m/s':'')+'.';
+
+    /* nachtminimum */
+    var night=null;
+    for(var k2=0;k2<ts.length;k2++){
+      var tt=new Date(ts[k2].time);
+      if(tt-Date.now()>26*3600000)break;
+      var hr=tt.getHours();
+      if(hr>=22||hr<=7){
+        var v=(ts[k2].data.instant.details||{}).air_temperature;
+        if(typeof v==='number'&&(night===null||v<night))night=v;
+      }
+    }
+    return {now:now,hours:hours,parts:parts,days:days,sun:sun,line:line,night:night,updated:updated};
+  });
+}
+
+function renderWeather(){
+  var d=W.data;
+  if(!d)return;
+  var n=d.now;
+  el('wtemp').textContent=(typeof n.temp==='number'?Math.round(n.temp):'—')+'°';
+  el('wsym').textContent=symText(n.sym);
+  el('wfeels').textContent=(typeof n.cloud==='number'?'Bewolking '+Math.round(n.cloud)+'%':'')+
+    (typeof n.hum==='number'?' · luchtvochtigheid '+Math.round(n.hum)+'%':'');
+  el('wwind').textContent=(typeof n.wind==='number'
+    ? windWord(n.wind)[0].toUpperCase()+windWord(n.wind).slice(1)+' '+Math.round(n.wind)+' m/s uit het '+windDir(n.dir)
+      +(n.gust?', uitschieters '+Math.round(n.gust)+' m/s':'')
+    : '');
+
+  var cells=[];
+  if(typeof d.night==='number') cells.push(['Vannacht',Math.round(d.night)+' °C'+(d.night<3?' — koud':'')]);
+  if(d.sun) cells.push(['Zon',hhmm(d.sun.up)+' – '+hhmm(d.sun.down)]);
+  if(typeof n.pres==='number') cells.push(['Luchtdruk',Math.round(n.pres)+' hPa ('+pressureWord(n.pres)+')']);
+  if(typeof n.dew==='number') cells.push(['Dauwpunt',Math.round(n.dew)+' °C'+
+    (typeof n.temp==='number'&&n.temp-n.dew<2?' — condens in de tent':'')]);
+  if(typeof n.uv==='number') cells.push(['UV-index',nl1(n.uv)]);
+  if(typeof n.fog==='number'&&n.fog>5) cells.push(['Mist',Math.round(n.fog)+'% kans op mistvorming']);
+  el('wgrid').innerHTML=cells.map(function(c){
+    return '<div><div class="lab">'+c[0]+'</div><div class="val">'+c[1]+'</div></div>';
+  }).join('');
+  el('wsummary').textContent=d.line;
+
+  var rows='';
+  if(W.tab==='uur'){
+    rows=d.hours.map(function(h){
+      var wet=h.mm>0.1;
+      var mm=wet?(nl1(h.mm)+(h.mmMax&&h.mmMax>h.mm+0.2?'–'+nl1(h.mmMax):'')+' mm'):'—';
+      var nacht=h.t.getHours()<6||h.t.getHours()>=22;
+      return '<div class="wrow'+(nacht?' night':'')+'"><span class="h num">'+hh(h.t)+'</span>'
+        +'<span class="s">'+symText(h.sym)+'</span>'
+        +'<span class="w num">'+(h.wind?Math.round(h.wind)+' '+windDir(h.dir).slice(0,1).toUpperCase():'')+'</span>'
+        +'<span class="p num'+(wet?' wet':'')+'">'+mm+'</span>'
+        +'<span class="tp num">'+(typeof h.temp==='number'?Math.round(h.temp)+'°':'')+'</span></div>';
+    }).join('');
+  } else if(W.tab==='dagdeel'){
+    rows=d.parts.map(function(p){
+      var wet=p.mm>0.1;
+      var mm=wet?nl1(p.mm)+' mm':'—';
+      var t=typeof p.temp==='number'?Math.round(p.temp)+'°':'';
+      return '<div class="wrow"><span class="h">'+p.label+'</span>'
+        +'<span class="s">'+symText(p.sym)+'</span>'
+        +'<span class="w num">'+(p.wind?Math.round(p.wind)+' m/s':'')+'</span>'
+        +'<span class="p num'+(wet?' wet':'')+'">'+mm+'</span>'
+        +'<span class="tp num">'+t+'</span></div>';
+    }).join('');
+  } else {
+    rows=d.days.map(function(g,i){
+      var wet=g.mm>0.1;
+      return '<div class="wrow"><span class="h">'+(i===0?'vandaag':DAG[g.t.getDay()]+' '+g.t.getDate())+'</span>'
+        +'<span class="s">'+symText(g.sym)+'</span>'
+        +'<span class="w num">'+(g.wind?Math.round(g.wind)+' m/s':'')+'</span>'
+        +'<span class="p num'+(wet?' wet':'')+'">'+(wet?nl1(g.mm)+' mm':'—')+'</span>'
+        +'<span class="tp num">'+(typeof g.min==='number'?Math.round(g.min)+'/'+Math.round(g.max)+'°':'')+'</span></div>';
+    }).join('');
+  }
+  el('wpanel').innerHTML=rows||'<div class="wrow"><span class="s">Geen gegevens.</span></div>';
+  el('wfoot').textContent='MET Norway'+(d.updated?' · model bijgewerkt '+hhmm(new Date(d.updated)):'')+
+    ' · verder vooruit wordt de verwachting onzekerder';
+}
+
+function loadWeather(lat,lon){
+  W.lat=lat;W.lon=lon;
+  el('wcoords').textContent=dms(lat)+'  '+dms(lon);
+  el('wsym').innerHTML='<span class="spin"></span> ophalen';
+  el('wtemp').textContent='—';el('wgrid').innerHTML='';el('wsummary').textContent='';
+  el('wpanel').innerHTML='';el('wfoot').textContent='';
+  if(!navigator.onLine){
+    el('wsym').textContent='Geen bereik';
+    el('wsummary').textContent='Het weerbericht heeft verbinding nodig. De kaart en je plekken werken wel offline.';
+    return;
+  }
+  fullForecast(lat,lon).then(function(d){W.data=d;renderWeather();})
+  .catch(function(){
+    el('wsym').textContent='Niet gelukt';
+    el('wsummary').textContent='Weerbericht niet op te halen. Probeer het zo nog eens of kijk op yr.no.';
+  });
+}
+
+var weatherOpen=false;
+el('btnWeather').addEventListener('click',function(){
+  weatherOpen=!weatherOpen;this.setAttribute('aria-pressed',String(weatherOpen));
+  el('weather').classList.toggle('hidden',!weatherOpen);
+  if(weatherOpen){
+    var c=probe?[probe.lat,probe.lon]:(me?[me.lat,me.lon]:[map.getCenter().lat,map.getCenter().lng]);
+    loadWeather(c[0],c[1]);openSheet();
+  }
+});
+document.querySelectorAll('.wtabs button').forEach(function(b){
+  b.addEventListener('click',function(){
+    W.tab=b.dataset.tab;
+    document.querySelectorAll('.wtabs button').forEach(function(x){
+      x.setAttribute('aria-pressed',String(x.dataset.tab===W.tab));
+    });
+    renderWeather();
+  });
+});
+
 /* ============ Overpass ============ */
 var OVER=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
 function overpass(q){
@@ -667,6 +894,7 @@ function assess(lat,lon){
   el('hours').classList.add('hidden');el('vmore').hidden=true;
   el('vmore').textContent='Toon de komende 12 uur';
   if(radarOn) loadStrip(lat,lon);
+  if(weatherOpen) loadWeather(lat,lon);
 
   if(!navigator.onLine){
     el('vhead').className='warn';el('vtitle').textContent='Geen bereik';
