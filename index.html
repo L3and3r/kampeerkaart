@@ -74,7 +74,7 @@
   #grip span{width:38px;height:4px;border-radius:2px;background:var(--line);display:block}
   #sheetbody{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 14px calc(14px + env(safe-area-inset-bottom))}
 
-  #actions{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px}
+  #actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px}
   .act{background:var(--rock-3);border:1px solid var(--line);border-radius:10px;color:var(--snow);
     padding:10px 4px;font:inherit;font-size:11px;font-weight:600;cursor:pointer;text-align:center;line-height:1.25}
   .act[aria-pressed="true"]{border-color:var(--water);color:var(--water)}
@@ -119,6 +119,39 @@
   .item .m{flex:0 0 auto;font-size:13px;color:var(--snow-dim)}
   .del{flex:0 0 auto;background:none;border:0;color:var(--snow-dim);font-size:17px;padding:4px 6px;cursor:pointer}
   .empty{color:var(--snow-dim);font-size:13px;padding:8px 0 2px}
+
+  /* ---- volledig weerbericht ---- */
+  #weather.hidden{display:none}
+  #wplace{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+  #wnow{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
+  #wnowtop{display:flex;align-items:flex-start;gap:12px;padding:12px 13px;background:var(--rock-3)}
+  #wtemp{font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1}
+  #wnowtop .r{flex:1}
+  #wnowtop .r b{display:block;font-size:14px;font-weight:600;margin-bottom:2px}
+  #wnowtop .r small{color:var(--snow-dim);font-size:12.5px;display:block}
+  #wgrid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  #wgrid div{padding:8px 13px;border-top:1px solid var(--line)}
+  #wgrid div:nth-child(even){border-left:1px solid var(--line)}
+  #wgrid .lab{font-size:9.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--snow-dim)}
+  #wgrid .val{font-size:14px;margin-top:1px}
+  #wsummary{font-size:13.5px;padding:10px 13px;border-top:1px solid var(--line);background:rgba(92,177,216,.07)}
+
+  .wtabs{display:flex;gap:4px;background:var(--rock-3);border:1px solid var(--line);
+    border-radius:9px;padding:3px;margin-bottom:9px}
+  .wtabs button{flex:1;background:none;border:0;color:var(--snow-dim);padding:7px 4px;border-radius:6px;
+    font:inherit;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;cursor:pointer}
+  .wtabs button[aria-pressed="true"]{background:var(--rock-2);color:var(--snow)}
+  #wpanel{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:10px}
+  .wrow{display:flex;align-items:center;gap:9px;padding:8px 12px;border-top:1px solid rgba(58,76,91,.55)}
+  .wrow:first-child{border-top:0}
+  .wrow .h{flex:0 0 52px;font-size:13px;font-weight:600}
+  .wrow .s{flex:1;font-size:13px;color:var(--snow-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wrow .w{flex:0 0 60px;text-align:right;font-size:12.5px;color:var(--snow-dim)}
+  .wrow .p{flex:0 0 62px;text-align:right;font-size:12.5px;color:var(--snow-dim)}
+  .wrow .p.wet{color:var(--water);font-weight:600}
+  .wrow .tp{flex:0 0 46px;text-align:right;font-size:13px;font-weight:600}
+  .wrow.night{background:rgba(20,28,36,.45)}
+  #wfoot{font-size:11.5px;color:var(--snow-dim);padding-top:2px}
 
   #offline.hidden{display:none}
   .etappe{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
@@ -205,6 +238,7 @@
       <button class="act" id="btnRadar" aria-pressed="false">Buien<br>radar</button>
       <button class="act" id="btnHere">Mijn<br>positie</button>
       <button class="act" id="btnSearch">Plekken<br>zoeken</button>
+      <button class="act" id="btnWeather" aria-pressed="false">Weer<br>bericht</button>
       <button class="act" id="btnOffline" aria-pressed="false">Offline<br>kaart</button>
     </div>
 
@@ -218,6 +252,28 @@
       <button id="vmore" hidden>Toon de komende 12 uur</button>
       <div id="hours" class="hidden"></div>
       <button id="vsave">Bewaar als kampeerplek</button>
+    </div>
+
+    <div class="block hidden" id="weather">
+      <div id="wplace">
+        <span class="legend">Weerbericht</span>
+        <span class="legend num" id="wcoords">—</span>
+      </div>
+      <div id="wnow">
+        <div id="wnowtop">
+          <div class="num" id="wtemp">—</div>
+          <div class="r"><b id="wsym">Ophalen…</b><small id="wfeels"></small><small id="wwind"></small></div>
+        </div>
+        <div id="wgrid"></div>
+        <div id="wsummary"></div>
+      </div>
+      <div class="wtabs" role="group" aria-label="Periode">
+        <button data-tab="uur" aria-pressed="true">Per uur</button>
+        <button data-tab="dagdeel" aria-pressed="false">Per dagdeel</button>
+        <button data-tab="dagen" aria-pressed="false">7 dagen</button>
+      </div>
+      <div id="wpanel"></div>
+      <div id="wfoot"></div>
     </div>
 
     <div class="block hidden" id="offline">
